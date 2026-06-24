@@ -177,15 +177,15 @@
       </label>
       <label class="field">
         <span class="lbl">Blob radius <b id="radiusV"></b></span>
-        <input type="range" id="radius" min="6" max="60" value="22" />
+        <input type="range" id="radius" min="6" max="80" value="26" />
       </label>
       <label class="field">
         <span class="lbl">Field strength <b id="strengthV"></b></span>
-        <input type="range" id="strength" min="10" max="100" value="55" />
+        <input type="range" id="strength" min="10" max="100" value="62" />
       </label>
       <label class="field">
         <span class="lbl">Threshold (iso-level) <b id="thresholdV"></b></span>
-        <input type="range" id="threshold" min="5" max="95" value="42" />
+        <input type="range" id="threshold" min="5" max="95" value="38" />
         <div class="hint">Lower = fatter, more merged. Higher = thin &amp; separated.</div>
       </label>
       <label class="field">
@@ -277,11 +277,11 @@
   const view = $("view");
   const ctx = view.getContext("2d");
 
-  // Offscreen canvases
-  const glyph = document.createElement("canvas");      // renders the text
+  // Offscreen canvas that renders the text (to sample blob centers from)
+  const glyph = document.createElement("canvas");
   const gctx = glyph.getContext("2d", { willReadFrequently: true });
-  const field = document.createElement("canvas");      // accumulates the scalar field
-  const fctx = field.getContext("2d", { willReadFrequently: true });
+  // Unclamped floating-point scalar field — the heart of real metaballs.
+  let fieldBuf = null;
 
   const controls = {
     text: $("text"), fontFamily: $("fontFamily"), fontSize: $("fontSize"),
@@ -354,26 +354,36 @@
       }
     }
 
-    // Size the visible + field canvases
+    // Size the visible canvas and (re)allocate the float field buffer
     view.width = baseW; view.height = baseH;
-    field.width = baseW; field.height = baseH;
+    fieldBuf = new Float32Array(baseW * baseH);
 
     $("stat").textContent =
       `${blobs.length} metaballs · ${baseW}×${baseH}px · "${text.replace(/\n/g, " ")}"`;
   }
 
   // ---------- Rendering ----------
+  // Real 2D metaballs: every blob adds a smooth falloff to a shared scalar
+  // field, accumulated WITHOUT clamping (Float32). Because the field from two
+  // nearby blobs sums in the gap between them, the region between them crosses
+  // the iso-threshold and a smooth connecting "neck" forms — that's what makes
+  // them merge instead of just overlapping as hard circles.
   function render(t) {
     const radius = +controls.radius.value;
-    const strength = +controls.strength.value / 100;
-    const threshold = (+controls.threshold.value / 100) * 255;
-    const smooth = +controls.smooth.value;
+    const peak = +controls.strength.value / 100;          // per-blob peak contribution
+    const T = (+controls.threshold.value / 100) * 1.2;    // iso-level in field units
+    const smoothUI = +controls.smooth.value;
+    const band = Math.max(0.006, smoothUI / 200);         // smoothstep half-width
     const wobble = controls.animate.checked ? +controls.wobble.value : 0;
     const speed = +controls.speed.value / 1000;
 
-    // 1) Accumulate the scalar field: additive soft radial blobs.
-    fctx.clearRect(0, 0, baseW, baseH);
-    fctx.globalCompositeOperation = "lighter";
+    const W = baseW, H = baseH;
+    const F = fieldBuf;
+    F.fill(0);
+    const R2 = radius * radius;
+    const invR2 = 1 / R2;
+
+    // 1) Splat each blob's Wyvill falloff (1 - d²/R²)² into the float field.
     for (let i = 0; i < blobs.length; i++) {
       const b = blobs[i];
       let bx = b.x, by = b.y;
@@ -381,19 +391,27 @@
         bx += Math.cos(t * speed + b.px) * wobble;
         by += Math.sin(t * speed + b.py) * wobble;
       }
-      const g = fctx.createRadialGradient(bx, by, 0, bx, by, radius);
-      g.addColorStop(0, `rgba(255,255,255,${strength})`);
-      g.addColorStop(1, "rgba(255,255,255,0)");
-      fctx.fillStyle = g;
-      fctx.fillRect(bx - radius, by - radius, radius * 2, radius * 2);
+      let x0 = (bx - radius) | 0, x1 = Math.ceil(bx + radius);
+      let y0 = (by - radius) | 0, y1 = Math.ceil(by + radius);
+      if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0;
+      if (x1 > W) x1 = W; if (y1 > H) y1 = H;
+      for (let y = y0; y < y1; y++) {
+        const dy = y - by, dy2 = dy * dy, row = y * W;
+        for (let x = x0; x < x1; x++) {
+          const dx = x - bx;
+          const d2 = dx * dx + dy2;
+          if (d2 < R2) {
+            const q = 1 - d2 * invR2;   // 1 at center -> 0 at radius
+            F[row + x] += peak * q * q;
+          }
+        }
+      }
     }
-    fctx.globalCompositeOperation = "source-over";
 
-    const src = fctx.getImageData(0, 0, baseW, baseH).data;
-    const out = ctx.createImageData(baseW, baseH);
+    // 2) Threshold the field into the visible image.
+    const out = ctx.createImageData(W, H);
     const o = out.data;
 
-    // Colors
     const [ar, ag, ab] = hexToRgb(controls.colorA.value);
     const [br, bg, bb] = hexToRgb(controls.colorB.value);
     const useGrad = controls.useGradient.checked;
@@ -401,46 +419,46 @@
     const transparent = controls.transparentBg.checked;
     const useOutline = controls.useOutline.checked;
     const [or_, og, ob] = hexToRgb(controls.outlineColor.value);
-    const outlineW = +controls.outlineW.value;
-    const aa = Math.max(0.5, smooth);
+    const outlineField = (+controls.outlineW.value) / 100; // outline depth in field units
+    const lo = T - band, span = 2 * band;
 
-    for (let y = 0; y < baseH; y++) {
-      for (let x = 0; x < baseW; x++) {
-        const idx = (y * baseW + x);
-        const v = src[idx * 4]; // accumulated field value (0..255)
+    for (let y = 0; y < H; y++) {
+      const yo = y * W;
+      for (let x = 0; x < W; x++) {
+        const idx = yo + x;
+        const v = F[idx];
         const i4 = idx * 4;
 
         // Fill color (horizontal gradient across the canvas)
         let r, g, bl;
         if (useGrad) {
-          const tt = x / baseW;
+          const tt = x / W;
           r = ar + (br - ar) * tt;
           g = ag + (bg - ag) * tt;
           bl = ab + (bb - ab) * tt;
         } else { r = ar; g = ag; bl = ab; }
 
         // smoothstep alpha around the iso-threshold
-        let alpha = (v - (threshold - aa)) / aa;
+        let alpha = (v - lo) / span;
         alpha = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha;
 
-        // Outline band just inside the surface
-        if (useOutline) {
-          const inner = threshold + outlineW;
-          let outFrac = (inner - v) / aa;
+        // Outline: a band of field values just above the surface
+        if (useOutline && alpha > 0) {
+          const inner = T + outlineField;
+          let outFrac = (inner - v) / Math.max(band, 1e-4);
           outFrac = outFrac < 0 ? 0 : outFrac > 1 ? 1 : outFrac;
-          outFrac *= alpha; // only where we're inside the shape
+          outFrac *= alpha;
           r = r + (or_ - r) * outFrac;
           g = g + (og - g) * outFrac;
           bl = bl + (ob - bl) * outFrac;
         }
 
         if (transparent) {
-          o[i4] = r; o[i4 + 1] = g; o[i4 + 2] = bl; o[i4 + 3] = Math.round(alpha * 255);
+          o[i4] = r; o[i4 + 1] = g; o[i4 + 2] = bl; o[i4 + 3] = (alpha * 255) | 0;
         } else {
-          const a = alpha;
-          o[i4]     = Math.round(r * a + bgr * (1 - a));
-          o[i4 + 1] = Math.round(g * a + bgg * (1 - a));
-          o[i4 + 2] = Math.round(bl * a + bgb * (1 - a));
+          o[i4]     = (r * alpha + bgr * (1 - alpha)) | 0;
+          o[i4 + 1] = (g * alpha + bgg * (1 - alpha)) | 0;
+          o[i4 + 2] = (bl * alpha + bgb * (1 - alpha)) | 0;
           o[i4 + 3] = 255;
         }
       }
