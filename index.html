@@ -37,30 +37,33 @@
     padding: 28px 24px 56px; overflow-y: auto; max-height: 100vh;
     counter-reset: grp;
   }
-  .masthead { margin-bottom: 4px; }
+  /* Type hierarchy:
+     L1 masthead 22px/700 · L2 section 10px/600 caps · L3 label 11px/500 caps
+     muted · L4 value 13px/600 fg · L5 hint 10.5px faint */
+  .masthead { margin-bottom: 6px; }
   .masthead h1 {
-    margin: 0; font: 600 14px/1.1 var(--ui-font);
-    text-transform: uppercase; letter-spacing: .04em;
+    margin: 0; font: 700 23px/1.02 var(--ui-font);
+    letter-spacing: -.01em;
   }
   .masthead .sub {
-    margin: 7px 0 0; color: var(--muted); font-size: 10.5px;
-    text-transform: uppercase; letter-spacing: .16em;
+    margin: 10px 0 0; color: var(--muted); font-size: 10px;
+    text-transform: uppercase; letter-spacing: .18em;
   }
-  .group { border-top: 1px solid var(--rule); padding-top: 15px; margin-top: 26px; }
+  .group { border-top: 1px solid var(--rule); padding-top: 16px; margin-top: 28px; }
   .group > h2 {
-    counter-increment: grp; display: flex; gap: 9px; align-items: baseline;
-    margin: 0 0 18px; font: 600 10px/1 var(--ui-font);
-    text-transform: uppercase; letter-spacing: .2em; color: var(--fg);
+    counter-increment: grp; display: flex; gap: 10px; align-items: baseline;
+    margin: 0 0 20px; font: 600 10px/1 var(--ui-font);
+    text-transform: uppercase; letter-spacing: .22em; color: var(--fg);
   }
   .group > h2::before { content: counter(grp, decimal-leading-zero); color: var(--faint); font-weight: 500; }
 
-  label.field { display: block; margin-bottom: 18px; }
+  label.field { display: block; margin-bottom: 19px; }
   label.field > span.lbl {
     display: flex; justify-content: space-between; align-items: baseline;
-    font-size: 10.5px; color: var(--muted); margin-bottom: 8px;
-    text-transform: uppercase; letter-spacing: .09em;
+    font-size: 11px; font-weight: 500; color: var(--muted); margin-bottom: 9px;
+    text-transform: uppercase; letter-spacing: .07em;
   }
-  label.field > span.lbl b { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+  label.field > span.lbl b { color: var(--fg); font-weight: 600; font-size: 13px; font-variant-numeric: tabular-nums; letter-spacing: 0; }
 
   input[type="text"], textarea, select {
     width: 100%; background: var(--field); color: var(--fg);
@@ -91,10 +94,29 @@
   .row { display: flex; gap: 16px; }
   .row > * { flex: 1; }
 
-  /* grayscale tone control: slider + live swatch */
-  .tone { display: flex; align-items: center; gap: 11px; }
-  .tone .sw { width: 20px; height: 20px; flex: none; border: 1px solid var(--line); }
-  .tone input[type="range"] { margin: 0; }
+  /* full-colour swatch (artwork colours — independent of UI theme) */
+  .swatch { display: flex; align-items: center; gap: 9px; }
+  input[type="color"] {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 30px; padding: 0; border: 1px solid var(--line);
+    border-radius: 0; background: transparent; cursor: pointer;
+  }
+  input[type="color"]::-webkit-color-swatch-wrapper { padding: 3px; }
+  input[type="color"]::-webkit-color-swatch { border: none; }
+  input[type="color"]::-moz-color-swatch { border: none; }
+
+  /* compact topbar controls (font / night / hide) */
+  .topselect {
+    width: auto; padding: 7px 26px 7px 10px; font: 600 10px/1 var(--ui-font);
+    text-transform: uppercase; letter-spacing: .08em; background-position: calc(100% - 12px) 12px, calc(100% - 7px) 12px;
+  }
+  .topbtn {
+    flex: none; padding: 8px 12px; background: transparent; color: var(--fg);
+    border: 1px solid var(--rule); font: 600 10px/1 var(--ui-font);
+    text-transform: uppercase; letter-spacing: .12em; cursor: pointer;
+  }
+  .topbtn:hover { background: var(--inv-bg); color: var(--inv-fg); }
+  .topbtn[aria-pressed="true"] { background: var(--rule); color: var(--bg); }
 
   /* minimal monochrome switch */
   .toggle { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
@@ -174,27 +196,8 @@
 <body>
   <aside>
     <div class="masthead">
-      <h1>Metaball Type</h1>
+      <h1>Metaball<br />Type</h1>
       <p class="sub">5×7 Grid · 2D Metaballs</p>
-    </div>
-
-    <div class="group">
-      <h2>Interface</h2>
-      <label class="field">
-        <span class="lbl">Typeface</span>
-        <select id="uiFont">
-          <option value="'Inter', system-ui, sans-serif">Inter</option>
-          <option value="'Archivo', system-ui, sans-serif">Archivo</option>
-          <option value="'Space Grotesk', system-ui, sans-serif">Space Grotesk</option>
-          <option value="'IBM Plex Sans', system-ui, sans-serif">IBM Plex Sans</option>
-          <option value="'Work Sans', system-ui, sans-serif">Work Sans</option>
-        </select>
-        <div class="hint">Interface only — the artwork uses the built-in 5×7 grid font.</div>
-      </label>
-      <div class="toggle">
-        <span>Night mode</span>
-        <label class="switch"><input type="checkbox" id="night" /><span class="slider"></span></label>
-      </div>
     </div>
 
     <div class="group">
@@ -272,39 +275,44 @@
     </div>
 
     <div class="group">
-      <h2>Tone</h2>
+      <h2>Color</h2>
+      <div class="hint" style="margin:-2px 0 14px">Artwork colors are independent of the day/night interface theme.</div>
       <div class="toggle">
-        <span>Gradient ink</span>
+        <span>Gradient type</span>
         <label class="switch"><input type="checkbox" id="useGradient" checked /><span class="slider"></span></label>
       </div>
-      <label class="field">
-        <span class="lbl">Ink</span>
-        <div class="tone"><span class="sw" id="toneAsw"></span><input type="range" id="toneA" min="0" max="100" value="8" /></div>
-      </label>
-      <label class="field">
-        <span class="lbl">Ink — gradient end</span>
-        <div class="tone"><span class="sw" id="toneBsw"></span><input type="range" id="toneB" min="0" max="100" value="42" /></div>
-      </label>
+      <div class="row">
+        <label class="field">
+          <span class="lbl">Type A</span>
+          <div class="swatch"><input type="color" id="colorA" value="#111111" /></div>
+        </label>
+        <label class="field">
+          <span class="lbl">Type B</span>
+          <div class="swatch"><input type="color" id="colorB" value="#8a8a8a" /></div>
+        </label>
+      </div>
       <div class="toggle">
         <span>Transparent background</span>
         <label class="switch"><input type="checkbox" id="transparentBg" /><span class="slider"></span></label>
       </div>
       <label class="field">
         <span class="lbl">Background</span>
-        <div class="tone"><span class="sw" id="bgTonesw"></span><input type="range" id="bgTone" min="0" max="100" value="100" /></div>
+        <div class="swatch"><input type="color" id="bgColor" value="#ffffff" /></div>
       </label>
       <div class="toggle">
         <span>Outline</span>
         <label class="switch"><input type="checkbox" id="useOutline" /><span class="slider"></span></label>
       </div>
-      <label class="field">
-        <span class="lbl">Outline tone</span>
-        <div class="tone"><span class="sw" id="outlineTonesw"></span><input type="range" id="outlineTone" min="0" max="100" value="100" /></div>
-      </label>
-      <label class="field">
-        <span class="lbl">Outline width <b id="outlineWV"></b></span>
-        <input type="range" id="outlineW" min="1" max="20" value="6" />
-      </label>
+      <div class="row">
+        <label class="field">
+          <span class="lbl">Outline color</span>
+          <div class="swatch"><input type="color" id="outlineColor" value="#ffffff" /></div>
+        </label>
+        <label class="field">
+          <span class="lbl">Outline width <b id="outlineWV"></b></span>
+          <input type="range" id="outlineW" min="1" max="20" value="6" />
+        </label>
+      </div>
     </div>
 
     <div class="btns">
@@ -321,6 +329,15 @@
       <div class="meta" id="stat">—</div>
       <div class="right">
         <span id="dims">—</span>
+        <select id="uiFont" class="topselect" title="Interface typeface">
+          <option value="'Inter', system-ui, sans-serif">Inter</option>
+          <option value="'Archivo', system-ui, sans-serif">Archivo</option>
+          <option value="'Space Grotesk', system-ui, sans-serif">Space Grotesk</option>
+          <option value="'IBM Plex Sans', system-ui, sans-serif">IBM Plex Sans</option>
+          <option value="'Work Sans', system-ui, sans-serif">Work Sans</option>
+        </select>
+        <button id="night" class="topbtn" aria-pressed="false">Night</button>
+        <button id="uiToggleTop" class="topbtn">Hide UI</button>
         <a class="link" id="repoLink" href="#" target="_blank" rel="noopener">Source</a>
       </div>
     </div>
@@ -364,22 +381,11 @@
     radius: $("radius"), strength: $("strength"),
     threshold: $("threshold"), smooth: $("smooth"), sizeVar: $("sizeVar"),
     animate: $("animate"), wobble: $("wobble"), speed: $("speed"),
-    useGradient: $("useGradient"), toneA: $("toneA"), toneB: $("toneB"),
-    transparentBg: $("transparentBg"), bgTone: $("bgTone"),
-    useOutline: $("useOutline"), outlineTone: $("outlineTone"), outlineW: $("outlineW"),
-    showGrid: $("showGrid"), uiFont: $("uiFont"), night: $("night"),
+    useGradient: $("useGradient"), colorA: $("colorA"), colorB: $("colorB"),
+    transparentBg: $("transparentBg"), bgColor: $("bgColor"),
+    useOutline: $("useOutline"), outlineColor: $("outlineColor"), outlineW: $("outlineW"),
+    showGrid: $("showGrid"), uiFont: $("uiFont"),
   };
-
-  // Grayscale-only palette: tone sliders (0..100 lightness) -> #rrggbb gray.
-  const grayHex = (l) => {
-    const v = Math.max(0, Math.min(255, Math.round(+l * 2.55)));
-    const h = v.toString(16).padStart(2, "0");
-    return "#" + h + h + h;
-  };
-  function updateSwatches() {
-    [["toneA", "toneAsw"], ["toneB", "toneBsw"], ["bgTone", "bgTonesw"], ["outlineTone", "outlineTonesw"]]
-      .forEach(([c, sw]) => { $(sw).style.background = grayHex(controls[c].value); });
-  }
 
   // Live value labels
   const labels = {
@@ -389,7 +395,6 @@
   };
   function syncLabels() {
     for (const k in labels) $(labels[k]).textContent = controls[k].value;
-    updateSwatches();
   }
 
   // ---------- Engine factory (self-contained, serialized for embeds) ----------
@@ -707,12 +712,12 @@
       wobble: +controls.wobble.value,
       speed: +controls.speed.value,
       gradient: controls.useGradient.checked,
-      colorA: grayHex(controls.toneA.value),
-      colorB: grayHex(controls.toneB.value),
+      colorA: controls.colorA.value,
+      colorB: controls.colorB.value,
       transparentBg: controls.transparentBg.checked,
-      bg: grayHex(controls.bgTone.value),
+      bg: controls.bgColor.value,
       outline: controls.useOutline.checked,
-      outlineColor: grayHex(controls.outlineTone.value),
+      outlineColor: controls.outlineColor.value,
       outlineW: +controls.outlineW.value,
       showGrid: controls.showGrid.checked,
     };
@@ -724,19 +729,14 @@
     $("dims").textContent = info.width + " × " + info.height + " px";
   }
 
-  // ---------- Theme (day / night), all monochrome ----------
-  const THEME_TONES = {
-    light: { bg: 100, a: 8, b: 42, o: 100 },
-    dark:  { bg: 6,   a: 96, b: 66, o: 0 },
-  };
-  function setTheme(theme, applyTones) {
+  // ---------- Interface theme (day / night) ----------
+  // The theme styles ONLY the surrounding UI. It never touches the artwork's
+  // colours or background — those are chosen independently in the Color panel.
+  const nightBtn = $("night");
+  function setTheme(theme) {
     document.documentElement.setAttribute("data-theme", theme);
-    controls.night.checked = theme === "dark";
-    if (applyTones) {
-      const p = THEME_TONES[theme];
-      controls.bgTone.value = p.bg; controls.toneA.value = p.a;
-      controls.toneB.value = p.b; controls.outlineTone.value = p.o;
-    }
+    nightBtn.textContent = theme === "dark" ? "Day" : "Night";
+    nightBtn.setAttribute("aria-pressed", theme === "dark" ? "true" : "false");
     try { localStorage.setItem("mt-theme", theme); } catch (e) {}
   }
   function setUiFont(font) {
@@ -744,11 +744,11 @@
     try { localStorage.setItem("mt-font", font); } catch (e) {}
   }
 
-  // Restore saved interface prefs before first build.
+  // Restore saved interface prefs (these don't affect the artwork).
   let savedTheme = "light", savedFont = null;
   try { savedTheme = localStorage.getItem("mt-theme") || "light"; } catch (e) {}
   try { savedFont = localStorage.getItem("mt-font"); } catch (e) {}
-  setTheme(savedTheme, true);
+  setTheme(savedTheme);
   if (savedFont) { controls.uiFont.value = savedFont; setUiFont(savedFont); }
 
   syncLabels();
@@ -758,41 +758,41 @@
   ["text", "fontSize", "letterSpacing", "align"].forEach((id) =>
     controls[id].addEventListener("input", () => { syncLabels(); engine.apply(readConfig(), true); }));
   ["radius", "strength", "threshold", "smooth", "sizeVar", "wobble", "speed",
-   "useGradient", "toneA", "toneB", "transparentBg", "bgTone",
-   "useOutline", "outlineTone", "outlineW", "showGrid"].forEach((id) =>
+   "useGradient", "colorA", "colorB", "transparentBg", "bgColor",
+   "useOutline", "outlineColor", "outlineW", "showGrid"].forEach((id) =>
     controls[id].addEventListener("input", () => { syncLabels(); engine.apply(readConfig(), false); }));
   controls.animate.addEventListener("change", () => engine.apply(readConfig(), false));
   controls.showGrid.addEventListener("change", () => engine.apply(readConfig(), false));
 
-  controls.night.addEventListener("change", () => {
-    setTheme(controls.night.checked ? "dark" : "light", true);
-    syncLabels(); engine.apply(readConfig(), false);
-  });
+  // Night mode toggles ONLY the UI (no engine re-render needed).
+  nightBtn.addEventListener("click", () =>
+    setTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark"));
   controls.uiFont.addEventListener("change", () => setUiFont(controls.uiFont.value));
 
-  // Hide / show the interface
+  // Hide / show every piece of UI (panel + topbar) via button or the H key.
   function setUI(hidden) {
     document.body.setAttribute("data-ui", hidden ? "hidden" : "shown");
-    $("uiToggle").textContent = hidden ? "Show UI" : "Hide UI";
+    const t = hidden ? "Show UI" : "Hide UI";
+    $("uiToggle").textContent = t; $("uiToggleTop").textContent = t;
   }
-  $("uiToggle").addEventListener("click", () =>
-    setUI(document.body.getAttribute("data-ui") !== "hidden"));
+  const toggleUI = () => setUI(document.body.getAttribute("data-ui") !== "hidden");
+  $("uiToggle").addEventListener("click", toggleUI);
+  $("uiToggleTop").addEventListener("click", toggleUI);
   document.addEventListener("keydown", (e) => {
-    if ((e.key === "h" || e.key === "H") && !/input|textarea|select/i.test(e.target.tagName))
-      setUI(document.body.getAttribute("data-ui") !== "hidden");
+    if ((e.key === "h" || e.key === "H") && !/input|textarea|select/i.test(e.target.tagName)) toggleUI();
   });
 
-  // Randomize (stays monochrome: random greys with contrast against the bg)
+  // Randomize the artwork (full colour)
   $("randomize").addEventListener("click", () => {
     const rnd = (a, b) => Math.round(a + Math.random() * (b - a));
+    const hex = () => "#" + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, "0");
     controls.radius.value = (1.0 + Math.random() * 0.7).toFixed(2);
     controls.strength.value = rnd(45, 80);
     controls.threshold.value = rnd(22, 42);
     controls.smooth.value = rnd(6, 22);
     controls.sizeVar.value = Math.random() < 0.5 ? 0 : rnd(15, 70);
-    const dark = +controls.bgTone.value < 50;       // pick ink that contrasts the bg
-    controls.toneA.value = dark ? rnd(70, 100) : rnd(0, 30);
-    controls.toneB.value = dark ? rnd(45, 80) : rnd(20, 55);
+    controls.colorA.value = hex();
+    controls.colorB.value = hex();
     controls.useGradient.checked = Math.random() > 0.3;
     syncLabels(); engine.apply(readConfig(), true);
   });

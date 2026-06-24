@@ -46,11 +46,12 @@ https://<owner>.github.io/<repo>/
   - *Edge softness* — anti-aliasing width in **pixels**, applied via the field
     gradient so necks stay exactly as crisp as blob rims (low = razor-sharp).
 - **Motion** — animate the blobs into "living goo" with adjustable wobble and speed.
-- **Tone** — strictly monochrome: grayscale ink (optional gradient), background
-  (or transparent), optional outline.
+- **Color** — the artwork (type + background + outline) can be **any color**, with
+  an optional two-color gradient. These are independent of the interface theme.
 - **Interface** — Swiss/International style (Müller-Brockmann): minimal, hairline
-  dividers, black/white/grey only. Day/night mode, a Google-font picker for the
-  UI, and a Hide-UI toggle (button or press **H**) for a clean canvas-only view.
+  dividers, black/white/grey chrome only. A **day/night** toggle themes *only the
+  UI* (never the artwork), a Google-font picker for the interface lives in the top
+  bar (out of the main controls), and the whole UI hides via a button or **H**.
 - **Randomize** and **download PNG**.
 - **Embed on your site** — export a self-contained `<script>` snippet (or a full
   `.html` file) that reproduces the animation with your exact settings.
