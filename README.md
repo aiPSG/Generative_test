@@ -2,9 +2,22 @@
 
 Generate **letters and numbers from 2D metaball blobs** — right in the browser.
 
-Type any text and the app renders each glyph as a field of soft, gooey
-metaballs that merge into the letter shapes. Tune the blobs, the iso-threshold,
+Type any text and the app draws each glyph from a **hand-made 5×7 grid font**
+(no system fonts), turns every filled cell into a metaball, and lets the blobs
+merge into smooth, gooey, connected letters. Tune the blobs, the iso-threshold,
 colors, and motion, then export a PNG.
+
+## Why a grid font?
+
+The chunky 5×7 grid style metaballizes *perfectly* because:
+
+- Every glyph has a **uniform 1-cell stroke width**, so one blob per filled
+  cell gives evenly-spaced metaballs that fuse into smooth necks.
+- Neighbouring cells (orthogonal **and** diagonal) sit close enough to connect,
+  so strokes stay continuous.
+- **Counters** (the holes in O, A, B, 8, …) are 2+ cells from any blob, so they
+  stay open instead of filling in — the letters remain legible even when very
+  gooey.
 
 ## Live demo
 
@@ -16,11 +29,12 @@ https://<owner>.github.io/<repo>/
 
 ## Features
 
-- **Text input** — letters, numbers, symbols, multiple lines.
-- **Font** picker and **font size**.
+- **Text input** — A–Z, 0–9 and `. , ! ? - : '`, multiple lines.
+- **Grid attributes**
+  - *Cell size* — pixels per grid cell (overall letter scale).
+  - *Letter spacing* — gap between glyphs, in cells.
 - **Metaball attributes**
-  - *Blob spacing* — distance between blob centers sampled along each glyph.
-  - *Blob radius* — size of each blob's influence.
+  - *Blob radius* — size of each cell's blob; bigger = thicker necks.
   - *Field strength* — how strongly each blob contributes to the field.
   - *Threshold (iso-level)* — fatter/merged vs. thin/separated blobs.
   - *Edge smoothing* — anti-aliasing of the iso-surface.
@@ -30,12 +44,14 @@ https://<owner>.github.io/<repo>/
 
 ## How it works
 
-1. The text is rendered to an offscreen canvas and the filled pixels are
-   sampled on a grid to produce a set of **blob centers**.
-2. Each center adds a soft radial falloff to a scalar **field** (additive
-   blending), which is the classic 2D metaball construction.
+1. Each character is looked up in a built-in **5×7 bitmap font** and every
+   filled cell becomes a **blob center**.
+2. Each blob adds a smooth Wyvill falloff `(1 − d²/R²)²` to an unclamped
+   floating-point scalar **field** — the classic 2D metaball construction.
+   Because two nearby blobs' fields add in the gap between them, that gap
+   crosses the threshold and a smooth **connecting neck** forms.
 3. Pixels whose field value crosses the **threshold** are filled — with a
-   smoothstep band for anti-aliasing — producing the gooey glyphs.
+   smoothstep band for anti-aliasing — producing the gooey, connected glyphs.
 
 Everything is a single self-contained `index.html` with no dependencies, so it
 works perfectly as a static GitHub Pages site.

@@ -150,34 +150,25 @@
       <label class="field">
         <span class="lbl">Your text</span>
         <textarea id="text" maxlength="60" spellcheck="false">GOO 123</textarea>
+        <div class="hint">A–Z, 0–9 and . , ! ? - : ' drawn from a built-in 5×7 grid font (no system fonts).</div>
       </label>
       <label class="field">
-        <span class="lbl">Font</span>
-        <select id="fontFamily">
-          <option value="900 {s}px 'Arial Black', Arial, sans-serif">Arial Black (heavy)</option>
-          <option value="bold {s}px Impact, Haettenschweiler, sans-serif">Impact</option>
-          <option value="bold {s}px Georgia, 'Times New Roman', serif">Georgia (serif)</option>
-          <option value="bold {s}px 'Courier New', monospace">Courier (mono)</option>
-          <option value="700 {s}px Verdana, Geneva, sans-serif">Verdana</option>
-        </select>
-        <div class="hint">Heavier fonts merge into cleaner blobs.</div>
+        <span class="lbl">Cell size (grid) <b id="fontSizeV"></b></span>
+        <input type="range" id="fontSize" min="10" max="60" value="26" />
+        <div class="hint">Pixels per grid cell — the overall letter scale.</div>
       </label>
       <label class="field">
-        <span class="lbl">Font size <b id="fontSizeV"></b></span>
-        <input type="range" id="fontSize" min="40" max="220" value="130" />
+        <span class="lbl">Letter spacing <b id="letterSpacingV"></b></span>
+        <input type="range" id="letterSpacing" min="0" max="3" step="1" value="1" />
       </label>
     </div>
 
     <div class="group">
       <h2>Metaball / Blob</h2>
       <label class="field">
-        <span class="lbl">Blob spacing <b id="spacingV"></b></span>
-        <input type="range" id="spacing" min="4" max="26" value="9" />
-        <div class="hint">Distance between blob centers along each glyph.</div>
-      </label>
-      <label class="field">
         <span class="lbl">Blob radius <b id="radiusV"></b></span>
-        <input type="range" id="radius" min="6" max="80" value="26" />
+        <input type="range" id="radius" min="6" max="90" value="32" />
+        <div class="hint">One blob per filled cell. Bigger radius = thicker necks between cells.</div>
       </label>
       <label class="field">
         <span class="lbl">Field strength <b id="strengthV"></b></span>
@@ -185,12 +176,12 @@
       </label>
       <label class="field">
         <span class="lbl">Threshold (iso-level) <b id="thresholdV"></b></span>
-        <input type="range" id="threshold" min="5" max="95" value="38" />
+        <input type="range" id="threshold" min="5" max="95" value="30" />
         <div class="hint">Lower = fatter, more merged. Higher = thin &amp; separated.</div>
       </label>
       <label class="field">
         <span class="lbl">Edge smoothing <b id="smoothV"></b></span>
-        <input type="range" id="smooth" min="0" max="40" value="10" />
+        <input type="range" id="smooth" min="0" max="40" value="12" />
       </label>
     </div>
 
@@ -277,15 +268,12 @@
   const view = $("view");
   const ctx = view.getContext("2d");
 
-  // Offscreen canvas that renders the text (to sample blob centers from)
-  const glyph = document.createElement("canvas");
-  const gctx = glyph.getContext("2d", { willReadFrequently: true });
   // Unclamped floating-point scalar field — the heart of real metaballs.
   let fieldBuf = null;
 
   const controls = {
-    text: $("text"), fontFamily: $("fontFamily"), fontSize: $("fontSize"),
-    spacing: $("spacing"), radius: $("radius"), strength: $("strength"),
+    text: $("text"), fontSize: $("fontSize"), letterSpacing: $("letterSpacing"),
+    radius: $("radius"), strength: $("strength"),
     threshold: $("threshold"), smooth: $("smooth"),
     animate: $("animate"), wobble: $("wobble"), speed: $("speed"),
     useGradient: $("useGradient"), colorA: $("colorA"), colorB: $("colorB"),
@@ -295,7 +283,7 @@
 
   // Live value labels
   const labels = {
-    fontSize: "fontSizeV", spacing: "spacingV", radius: "radiusV",
+    fontSize: "fontSizeV", letterSpacing: "letterSpacingV", radius: "radiusV",
     strength: "strengthV", threshold: "thresholdV", smooth: "smoothV",
     wobble: "wobbleV", speed: "speedV", outlineW: "outlineWV",
   };
@@ -304,53 +292,106 @@
   }
 
   // ---------- Helpers ----------
-  const PAD = 60; // px padding around the text on the canvas
   function hexToRgb(h) {
     const n = parseInt(h.slice(1), 16);
     return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
   }
 
-  // Build the list of blob centers by sampling filled glyph pixels.
+  // ---------- Hand-drawn 5×7 grid font ----------
+  // No system fonts. Each glyph is a 7-row × 5-col bitmap with a UNIFORM
+  // 1-cell stroke width — the style that metaballizes cleanly: every filled
+  // cell becomes one blob, neighbouring blobs fuse into smooth necks, and the
+  // counters (holes in O/A/B/8…) stay open because they sit 2+ cells from any
+  // blob. "#" = filled cell, "." = empty.
+  const GW = 5, GH = 7, LINE_GAP = 2;
+  const FONT = {
+    " ": ["....." ,"....." ,"....." ,"....." ,"....." ,"....." ,"....."],
+    "A": [".###.","#...#","#...#","#####","#...#","#...#","#...#"],
+    "B": ["####.","#...#","#...#","####.","#...#","#...#","####."],
+    "C": [".####","#....","#....","#....","#....","#....",".####"],
+    "D": ["####.","#...#","#...#","#...#","#...#","#...#","####."],
+    "E": ["#####","#....","#....","####.","#....","#....","#####"],
+    "F": ["#####","#....","#....","####.","#....","#....","#...."],
+    "G": [".####","#....","#....","#.###","#...#","#...#",".####"],
+    "H": ["#...#","#...#","#...#","#####","#...#","#...#","#...#"],
+    "I": [".###.","..#..","..#..","..#..","..#..","..#..",".###."],
+    "J": ["..###","...#.","...#.","...#.","#..#.","#..#.",".##.."],
+    "K": ["#...#","#..#.","#.#..","##...","#.#..","#..#.","#...#"],
+    "L": ["#....","#....","#....","#....","#....","#....","#####"],
+    "M": ["#...#","##.##","#.#.#","#.#.#","#...#","#...#","#...#"],
+    "N": ["#...#","##..#","#.#.#","#.#.#","#..##","#...#","#...#"],
+    "O": [".###.","#...#","#...#","#...#","#...#","#...#",".###."],
+    "P": ["####.","#...#","#...#","####.","#....","#....","#...."],
+    "Q": [".###.","#...#","#...#","#...#","#.#.#","#..#.",".##.#"],
+    "R": ["####.","#...#","#...#","####.","#.#..","#..#.","#...#"],
+    "S": [".####","#....","#....",".###.","....#","....#","####."],
+    "T": ["#####","..#..","..#..","..#..","..#..","..#..","..#.."],
+    "U": ["#...#","#...#","#...#","#...#","#...#","#...#",".###."],
+    "V": ["#...#","#...#","#...#","#...#",".#.#.",".#.#.","..#.."],
+    "W": ["#...#","#...#","#...#","#.#.#","#.#.#","#.#.#",".#.#."],
+    "X": ["#...#","#...#",".#.#.","..#..",".#.#.","#...#","#...#"],
+    "Y": ["#...#","#...#",".#.#.","..#..","..#..","..#..","..#.."],
+    "Z": ["#####","....#","...#.","..#..",".#...","#....","#####"],
+    "0": [".###.","#..##","#.#.#","#.#.#","##..#","#...#",".###."],
+    "1": ["..#..",".##..","..#..","..#..","..#..","..#..",".###."],
+    "2": [".###.","#...#","....#","...#.","..#..",".#...","#####"],
+    "3": ["####.","....#","....#",".###.","....#","....#","####."],
+    "4": ["...#.","..##.",".#.#.","#..#.","#####","...#.","...#."],
+    "5": ["#####","#....","####.","....#","....#","#...#",".###."],
+    "6": [".###.","#....","#....","####.","#...#","#...#",".###."],
+    "7": ["#####","....#","...#.","..#..",".#...",".#...",".#..."],
+    "8": [".###.","#...#","#...#",".###.","#...#","#...#",".###."],
+    "9": [".###.","#...#","#...#",".####","....#","....#",".###."],
+    ".": [".....",".....",".....",".....",".....",".##..",".##.."],
+    ",": [".....",".....",".....",".....",".##..",".##..",".#..."],
+    "!": ["..#..","..#..","..#..","..#..","..#..",".....","..#.."],
+    "?": [".###.","#...#","....#","..##.","..#..",".....","..#.."],
+    "-": [".....",".....",".....",".###.",".....",".....","....."],
+    ":": [".....",".##..",".##..",".....",".##..",".##..","....."],
+    "'": ["..#..","..#..",".#...",".....",".....",".....","....."],
+  };
+  function glyphFor(ch) {
+    const u = ch.toUpperCase();
+    return FONT[u] || (ch === " " ? FONT[" "] : FONT["?"]);
+  }
+
+  // Lay the grid font out into one blob per filled cell.
   let blobs = [];
   let baseW = 800, baseH = 300;
 
   function buildBlobs() {
     const text = controls.text.value || " ";
-    const fs = +controls.fontSize.value;
-    const fontSpec = controls.fontFamily.value.replace("{s}", fs);
-    const spacing = +controls.spacing.value;
-
-    // Support multiple lines split on newline
+    const cell = +controls.fontSize.value;        // pixels per grid cell
+    const ls = +controls.letterSpacing.value;     // gap between glyphs, in cells
     const lines = text.split("\n");
-    gctx.font = fontSpec;
-    gctx.textBaseline = "alphabetic";
-    let maxW = 1;
-    for (const ln of lines) maxW = Math.max(maxW, gctx.measureText(ln).width);
-    const lineH = fs * 1.18;
-    const textH = lineH * lines.length;
 
-    baseW = Math.ceil(maxW) + PAD * 2;
-    baseH = Math.ceil(textH) + PAD * 2;
+    const colsPerLine = lines.map((ln) =>
+      Math.max(ln.length, 1) * GW + Math.max(ln.length - 1, 0) * ls);
+    const maxCols = Math.max(1, ...colsPerLine);
+    const totalRows = lines.length * GH + (lines.length - 1) * LINE_GAP;
 
-    glyph.width = baseW; glyph.height = baseH;
-    gctx.clearRect(0, 0, baseW, baseH);
-    gctx.font = fontSpec;
-    gctx.fillStyle = "#fff";
-    gctx.textBaseline = "alphabetic";
-    gctx.textAlign = "center";
-    for (let i = 0; i < lines.length; i++) {
-      const y = PAD + (i + 1) * lineH - fs * 0.24;
-      gctx.fillText(lines[i], baseW / 2, y);
-    }
+    const PAD = Math.round(cell * 1.6 + 24);      // margin so blob glow isn't clipped
+    baseW = maxCols * cell + PAD * 2;
+    baseH = totalRows * cell + PAD * 2;
 
-    const data = gctx.getImageData(0, 0, baseW, baseH).data;
     blobs = [];
-    for (let y = 0; y < baseH; y += spacing) {
-      for (let x = 0; x < baseW; x += spacing) {
-        if (data[(y * baseW + x) * 4 + 3] > 100) {
-          // phases for the wobble animation
-          blobs.push({ x, y, px: Math.random() * 6.283, py: Math.random() * 6.283 });
+    for (let li = 0; li < lines.length; li++) {
+      const ln = lines[li];
+      const rowBase = li * (GH + LINE_GAP);
+      let col = (maxCols - colsPerLine[li]) / 2;   // center each line
+      for (const ch of ln) {
+        const g = glyphFor(ch);
+        for (let r = 0; r < GH; r++) {
+          const rowStr = g[r];
+          for (let c = 0; c < GW; c++) {
+            if (rowStr[c] === "#") {
+              const cx = PAD + (col + c + 0.5) * cell;
+              const cy = PAD + (rowBase + r + 0.5) * cell;
+              blobs.push({ x: cx, y: cy, px: Math.random() * 6.283, py: Math.random() * 6.283 });
+            }
+          }
         }
+        col += GW + ls;
       }
     }
 
@@ -359,7 +400,7 @@
     fieldBuf = new Float32Array(baseW * baseH);
 
     $("stat").textContent =
-      `${blobs.length} metaballs · ${baseW}×${baseH}px · "${text.replace(/\n/g, " ")}"`;
+      `${blobs.length} cells · ${baseW}×${baseH}px · 5×7 grid font · "${text.replace(/\n/g, " ")}"`;
   }
 
   // ---------- Rendering ----------
@@ -485,7 +526,7 @@
 
   // ---------- Wiring ----------
   // Controls that change geometry -> rebuild blob set
-  ["text", "fontFamily", "fontSize", "spacing"].forEach((id) =>
+  ["text", "fontSize", "letterSpacing"].forEach((id) =>
     controls[id].addEventListener("input", () => { syncLabels(); rebuild(); }));
   // Controls that only change appearance -> just re-render
   ["radius", "strength", "threshold", "smooth", "wobble", "speed",
@@ -497,11 +538,11 @@
   // Randomize
   $("randomize").addEventListener("click", () => {
     const rnd = (a, b) => Math.round(a + Math.random() * (b - a));
-    controls.spacing.value = rnd(6, 14);
-    controls.radius.value = rnd(14, 40);
-    controls.strength.value = rnd(35, 80);
-    controls.threshold.value = rnd(28, 60);
-    controls.smooth.value = rnd(4, 22);
+    const cell = +controls.fontSize.value;
+    controls.radius.value = rnd(Math.round(cell * 1.0), Math.round(cell * 1.5));
+    controls.strength.value = rnd(45, 80);
+    controls.threshold.value = rnd(22, 42);
+    controls.smooth.value = rnd(6, 22);
     const h = () => "#" + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, "0");
     controls.colorA.value = h();
     controls.colorB.value = h();
