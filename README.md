@@ -38,6 +38,8 @@ https://<owner>.github.io/<repo>/
 - **Metaball attributes**
   - *Blob radius (× cell)* — blob size as a multiple of the cell, so letters
     keep merging at any scale; bigger = thicker necks.
+  - *Cell size variation* — randomly varies each cell's blob size (0 = uniform)
+    for a more organic, hand-made look.
   - *Field strength* — how strongly each blob contributes to the field.
   - *Threshold (iso-level)* — fatter/merged vs. thin/separated blobs.
   - *Edge smoothing* — anti-aliasing of the iso-surface.

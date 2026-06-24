@@ -183,6 +183,11 @@
         <span class="lbl">Edge smoothing <b id="smoothV"></b></span>
         <input type="range" id="smooth" min="0" max="40" value="12" />
       </label>
+      <label class="field">
+        <span class="lbl">Cell size variation <b id="sizeVarV"></b></span>
+        <input type="range" id="sizeVar" min="0" max="100" value="0" />
+        <div class="hint">Randomly varies each cell's blob size. 0 = uniform.</div>
+      </label>
       <div class="toggle">
         <span>Show underlying grid</span>
         <label class="switch"><input type="checkbox" id="showGrid" /><span class="slider"></span></label>
@@ -278,7 +283,7 @@
   const controls = {
     text: $("text"), fontSize: $("fontSize"), letterSpacing: $("letterSpacing"),
     radius: $("radius"), strength: $("strength"),
-    threshold: $("threshold"), smooth: $("smooth"),
+    threshold: $("threshold"), smooth: $("smooth"), sizeVar: $("sizeVar"),
     animate: $("animate"), wobble: $("wobble"), speed: $("speed"),
     useGradient: $("useGradient"), colorA: $("colorA"), colorB: $("colorB"),
     transparentBg: $("transparentBg"), bgColor: $("bgColor"),
@@ -290,7 +295,7 @@
   const labels = {
     fontSize: "fontSizeV", letterSpacing: "letterSpacingV", radius: "radiusV",
     strength: "strengthV", threshold: "thresholdV", smooth: "smoothV",
-    wobble: "wobbleV", speed: "speedV", outlineW: "outlineWV",
+    sizeVar: "sizeVarV", wobble: "wobbleV", speed: "speedV", outlineW: "outlineWV",
   };
   function syncLabels() {
     for (const k in labels) $(labels[k]).textContent = controls[k].value;
@@ -405,7 +410,7 @@
     const maxCols = Math.max(1, ...lineLayouts.map((l) => l.width));
     const totalRows = lines.length * GH + (lines.length - 1) * LINE_GAP;
 
-    const PAD = Math.round(cell * 2.3 + 18);      // margin so blob glow isn't clipped
+    const PAD = Math.round(cell * 2.8 + 18);      // margin so blob glow (incl. size variation) isn't clipped
     baseW = Math.round(maxCols * cell + PAD * 2);
     baseH = Math.round(totalRows * cell + PAD * 2);
 
@@ -425,7 +430,11 @@
             if (it.g[r][c] === "#") {
               const cx = PAD + (col0 + i + 0.5) * cell;
               const cy = PAD + (rowBase + r + 0.5) * cell;
-              blobs.push({ x: cx, y: cy, px: Math.random() * 6.283, py: Math.random() * 6.283 });
+              blobs.push({
+                x: cx, y: cy,
+                vr: Math.random() * 2 - 1,          // stable per-cell size seed [-1,1]
+                px: Math.random() * 6.283, py: Math.random() * 6.283,
+              });
             }
           }
         }
@@ -457,22 +466,25 @@
     const wobble = controls.animate.checked ? +controls.wobble.value : 0;
     const speed = +controls.speed.value / 1000;
 
+    const variation = +controls.sizeVar.value / 100;     // 0..1 per-cell size spread
+
     const W = baseW, H = baseH;
     const F = fieldBuf;
     F.fill(0);
-    const R2 = radius * radius;
-    const invR2 = 1 / R2;
 
     // 1) Splat each blob's Wyvill falloff (1 - d²/R²)² into the float field.
+    //    Each blob's radius is jittered by its stable per-cell seed.
     for (let i = 0; i < blobs.length; i++) {
       const b = blobs[i];
+      const br = Math.max(2, radius * (1 + variation * b.vr));
+      const R2 = br * br, invR2 = 1 / R2;
       let bx = b.x, by = b.y;
       if (wobble) {
         bx += Math.cos(t * speed + b.px) * wobble;
         by += Math.sin(t * speed + b.py) * wobble;
       }
-      let x0 = (bx - radius) | 0, x1 = Math.ceil(bx + radius);
-      let y0 = (by - radius) | 0, y1 = Math.ceil(by + radius);
+      let x0 = (bx - br) | 0, x1 = Math.ceil(bx + br);
+      let y0 = (by - br) | 0, y1 = Math.ceil(by + br);
       if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0;
       if (x1 > W) x1 = W; if (y1 > H) y1 = H;
       for (let y = y0; y < y1; y++) {
@@ -603,7 +615,7 @@
   ["text", "fontSize", "letterSpacing"].forEach((id) =>
     controls[id].addEventListener("input", () => { syncLabels(); rebuild(); }));
   // Controls that only change appearance -> just re-render
-  ["radius", "strength", "threshold", "smooth", "wobble", "speed",
+  ["radius", "strength", "threshold", "smooth", "sizeVar", "wobble", "speed",
    "useGradient", "colorA", "colorB", "transparentBg", "bgColor",
    "useOutline", "outlineColor", "outlineW", "showGrid"].forEach((id) =>
     controls[id].addEventListener("input", () => { syncLabels(); kick(); }));
@@ -617,6 +629,7 @@
     controls.strength.value = rnd(45, 80);
     controls.threshold.value = rnd(22, 42);
     controls.smooth.value = rnd(6, 22);
+    controls.sizeVar.value = Math.random() < 0.5 ? 0 : rnd(15, 70);
     const h = () => "#" + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, "0");
     controls.colorA.value = h();
     controls.colorB.value = h();
