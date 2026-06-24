@@ -166,9 +166,9 @@
     <div class="group">
       <h2>Metaball / Blob</h2>
       <label class="field">
-        <span class="lbl">Blob radius <b id="radiusV"></b></span>
-        <input type="range" id="radius" min="6" max="90" value="32" />
-        <div class="hint">One blob per filled cell. Bigger radius = thicker necks between cells.</div>
+        <span class="lbl">Blob radius (× cell) <b id="radiusV"></b></span>
+        <input type="range" id="radius" min="0.6" max="2.2" step="0.05" value="1.25" />
+        <div class="hint">One blob per filled cell, sized relative to the cell so it always merges. Bigger = thicker necks.</div>
       </label>
       <label class="field">
         <span class="lbl">Field strength <b id="strengthV"></b></span>
@@ -183,6 +183,10 @@
         <span class="lbl">Edge smoothing <b id="smoothV"></b></span>
         <input type="range" id="smooth" min="0" max="40" value="12" />
       </label>
+      <div class="toggle">
+        <span>Show underlying grid</span>
+        <label class="switch"><input type="checkbox" id="showGrid" /><span class="slider"></span></label>
+      </div>
     </div>
 
     <div class="group">
@@ -279,6 +283,7 @@
     useGradient: $("useGradient"), colorA: $("colorA"), colorB: $("colorB"),
     transparentBg: $("transparentBg"), bgColor: $("bgColor"),
     useOutline: $("useOutline"), outlineColor: $("outlineColor"), outlineW: $("outlineW"),
+    showGrid: $("showGrid"),
   };
 
   // Live value labels
@@ -354,46 +359,80 @@
     const u = ch.toUpperCase();
     return FONT[u] || (ch === " " ? FONT[" "] : FONT["?"]);
   }
+  // Inked column extent of a glyph -> [minCol, maxCol], or null if blank.
+  // This is what makes proportional kerning possible: narrow glyphs (I, !, .)
+  // only advance by the columns they actually use instead of a fixed 5.
+  function inkExtent(g) {
+    let min = GW, max = -1;
+    for (let r = 0; r < GH; r++)
+      for (let c = 0; c < GW; c++)
+        if (g[r][c] === "#") { if (c < min) min = c; if (c > max) max = c; }
+    return max < 0 ? null : [min, max];
+  }
+  const SPACE_ADVANCE = 3; // word-space width, in cells
 
-  // Lay the grid font out into one blob per filled cell.
+  // Lay the grid font out into one blob per filled cell, with proportional
+  // advance widths so kerning looks even.
   let blobs = [];
+  let glyphBoxes = [];     // inked cell boxes, for the optional grid overlay
+  let layout = { cell: 26, pad: 60, cols: 1, rows: 1 };
   let baseW = 800, baseH = 300;
 
   function buildBlobs() {
     const text = controls.text.value || " ";
     const cell = +controls.fontSize.value;        // pixels per grid cell
-    const ls = +controls.letterSpacing.value;     // gap between glyphs, in cells
+    const tracking = +controls.letterSpacing.value; // gap between glyphs, in cells
     const lines = text.split("\n");
 
-    const colsPerLine = lines.map((ln) =>
-      Math.max(ln.length, 1) * GW + Math.max(ln.length - 1, 0) * ls);
-    const maxCols = Math.max(1, ...colsPerLine);
+    // First pass: measure each line using trimmed glyph widths.
+    const lineLayouts = lines.map((ln) => {
+      const items = [];
+      let width = 0;
+      const chars = [...ln];
+      for (let k = 0; k < chars.length; k++) {
+        const g = glyphFor(chars[k]);
+        const ext = inkExtent(g);
+        const item = ext
+          ? { g, minC: ext[0], w: ext[1] - ext[0] + 1, blank: false, x: width }
+          : { g, minC: 0, w: SPACE_ADVANCE, blank: true, x: width };
+        items.push(item);
+        width += item.w;
+        if (k < chars.length - 1) width += tracking;
+      }
+      return { items, width: Math.max(width, 1) };
+    });
+
+    const maxCols = Math.max(1, ...lineLayouts.map((l) => l.width));
     const totalRows = lines.length * GH + (lines.length - 1) * LINE_GAP;
 
-    const PAD = Math.round(cell * 1.6 + 24);      // margin so blob glow isn't clipped
-    baseW = maxCols * cell + PAD * 2;
-    baseH = totalRows * cell + PAD * 2;
+    const PAD = Math.round(cell * 2.3 + 18);      // margin so blob glow isn't clipped
+    baseW = Math.round(maxCols * cell + PAD * 2);
+    baseH = Math.round(totalRows * cell + PAD * 2);
 
     blobs = [];
-    for (let li = 0; li < lines.length; li++) {
-      const ln = lines[li];
+    glyphBoxes = [];
+    for (let li = 0; li < lineLayouts.length; li++) {
+      const { items, width } = lineLayouts[li];
       const rowBase = li * (GH + LINE_GAP);
-      let col = (maxCols - colsPerLine[li]) / 2;   // center each line
-      for (const ch of ln) {
-        const g = glyphFor(ch);
+      const startCol = (maxCols - width) / 2;       // center each line
+      for (const it of items) {
+        if (it.blank) continue;
+        const col0 = startCol + it.x;               // abs grid col of glyph's 1st inked column
+        glyphBoxes.push({ g: it.g, minC: it.minC, cols: it.w, col0, row0: rowBase });
         for (let r = 0; r < GH; r++) {
-          const rowStr = g[r];
-          for (let c = 0; c < GW; c++) {
-            if (rowStr[c] === "#") {
-              const cx = PAD + (col + c + 0.5) * cell;
+          for (let i = 0; i < it.w; i++) {
+            const c = it.minC + i;
+            if (it.g[r][c] === "#") {
+              const cx = PAD + (col0 + i + 0.5) * cell;
               const cy = PAD + (rowBase + r + 0.5) * cell;
               blobs.push({ x: cx, y: cy, px: Math.random() * 6.283, py: Math.random() * 6.283 });
             }
           }
         }
-        col += GW + ls;
       }
     }
+
+    layout = { cell, pad: PAD, cols: maxCols, rows: totalRows };
 
     // Size the visible canvas and (re)allocate the float field buffer
     view.width = baseW; view.height = baseH;
@@ -410,7 +449,7 @@
   // the iso-threshold and a smooth connecting "neck" forms — that's what makes
   // them merge instead of just overlapping as hard circles.
   function render(t) {
-    const radius = +controls.radius.value;
+    const radius = (+controls.radius.value) * layout.cell;  // ratio × cell size
     const peak = +controls.strength.value / 100;          // per-blob peak contribution
     const T = (+controls.threshold.value / 100) * 1.2;    // iso-level in field units
     const smoothUI = +controls.smooth.value;
@@ -505,6 +544,41 @@
       }
     }
     ctx.putImageData(out, 0, 0);
+
+    if (controls.showGrid.checked) drawGrid();
+  }
+
+  // Draw the underlying 5×7 lattice each glyph is built on. Lines adapt to the
+  // background luminance so they read on light or dark. Filled cells (the blob
+  // sources) are drawn brighter, with a dot at each blob center.
+  function drawGrid() {
+    const cell = layout.cell, pad = layout.pad;
+    const [bgr, bgg, bgb] = hexToRgb(controls.bgColor.value);
+    const lum = controls.transparentBg.checked
+      ? 0.12 : (0.299 * bgr + 0.587 * bgg + 0.114 * bgb) / 255;
+    const base = lum > 0.5 ? "0,0,0" : "255,255,255";
+
+    ctx.save();
+    ctx.lineWidth = 1;
+    for (const box of glyphBoxes) {
+      for (let r = 0; r < GH; r++) {
+        for (let i = 0; i < box.cols; i++) {
+          const c = box.minC + i;
+          const x = pad + (box.col0 + i) * cell;
+          const y = pad + (box.row0 + r) * cell;
+          const on = box.g[r][c] === "#";
+          ctx.strokeStyle = `rgba(${base},${on ? 0.34 : 0.10})`;
+          ctx.strokeRect(x + 0.5, y + 0.5, cell, cell);
+          if (on) {
+            ctx.fillStyle = `rgba(${base},0.5)`;
+            ctx.beginPath();
+            ctx.arc(x + cell / 2, y + cell / 2, Math.max(1.2, cell * 0.06), 0, 6.2832);
+            ctx.fill();
+          }
+        }
+      }
+    }
+    ctx.restore();
   }
 
   // ---------- Loop ----------
@@ -531,15 +605,15 @@
   // Controls that only change appearance -> just re-render
   ["radius", "strength", "threshold", "smooth", "wobble", "speed",
    "useGradient", "colorA", "colorB", "transparentBg", "bgColor",
-   "useOutline", "outlineColor", "outlineW"].forEach((id) =>
+   "useOutline", "outlineColor", "outlineW", "showGrid"].forEach((id) =>
     controls[id].addEventListener("input", () => { syncLabels(); kick(); }));
   controls.animate.addEventListener("change", kick);
+  controls.showGrid.addEventListener("change", kick);
 
   // Randomize
   $("randomize").addEventListener("click", () => {
     const rnd = (a, b) => Math.round(a + Math.random() * (b - a));
-    const cell = +controls.fontSize.value;
-    controls.radius.value = rnd(Math.round(cell * 1.0), Math.round(cell * 1.5));
+    controls.radius.value = (1.0 + Math.random() * 0.7).toFixed(2); // ratio of cell
     controls.strength.value = rnd(45, 80);
     controls.threshold.value = rnd(22, 42);
     controls.smooth.value = rnd(6, 22);

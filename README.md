@@ -32,9 +32,12 @@ https://<owner>.github.io/<repo>/
 - **Text input** — A–Z, 0–9 and `. , ! ? - : '`, multiple lines.
 - **Grid attributes**
   - *Cell size* — pixels per grid cell (overall letter scale).
-  - *Letter spacing* — gap between glyphs, in cells.
+  - *Letter spacing* — gap between glyphs, in cells. Glyphs use **proportional
+    kerning** (narrow glyphs like `I !  . 1` only advance by the columns they use).
+  - *Show underlying grid* — overlay the 5×7 lattice each glyph is built on.
 - **Metaball attributes**
-  - *Blob radius* — size of each cell's blob; bigger = thicker necks.
+  - *Blob radius (× cell)* — blob size as a multiple of the cell, so letters
+    keep merging at any scale; bigger = thicker necks.
   - *Field strength* — how strongly each blob contributes to the field.
   - *Threshold (iso-level)* — fatter/merged vs. thin/separated blobs.
   - *Edge smoothing* — anti-aliasing of the iso-surface.
