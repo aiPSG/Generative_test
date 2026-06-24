@@ -180,8 +180,9 @@
         <div class="hint">Lower = fatter, more merged. Higher = thin &amp; separated.</div>
       </label>
       <label class="field">
-        <span class="lbl">Edge smoothing <b id="smoothV"></b></span>
-        <input type="range" id="smooth" min="0" max="40" value="12" />
+        <span class="lbl">Edge softness <b id="smoothV"></b></span>
+        <input type="range" id="smooth" min="0" max="40" value="3" />
+        <div class="hint">Anti-aliasing width in pixels, uniform across rims and necks. Low = razor-sharp everywhere.</div>
       </label>
       <label class="field">
         <span class="lbl">Cell size variation <b id="sizeVarV"></b></span>
@@ -462,7 +463,9 @@
     const peak = +controls.strength.value / 100;          // per-blob peak contribution
     const T = (+controls.threshold.value / 100) * 1.2;    // iso-level in field units
     const smoothUI = +controls.smooth.value;
-    const band = Math.max(0.006, smoothUI / 200);         // smoothstep half-width
+    // Edge softness measured in PIXELS, applied uniformly via the field gradient
+    // so necks are exactly as crisp as blob rims. ~0.75px = razor sharp.
+    const aa = 0.75 + (smoothUI / 40) * 4;
     const wobble = controls.animate.checked ? +controls.wobble.value : 0;
     const speed = +controls.speed.value / 1000;
 
@@ -511,8 +514,8 @@
     const transparent = controls.transparentBg.checked;
     const useOutline = controls.useOutline.checked;
     const [or_, og, ob] = hexToRgb(controls.outlineColor.value);
-    const outlineField = (+controls.outlineW.value) / 100; // outline depth in field units
-    const lo = T - band, span = 2 * band;
+    const outlinePx = useOutline ? +controls.outlineW.value : 0; // outline width in pixels
+    const invAA = 1 / aa;
 
     for (let y = 0; y < H; y++) {
       const yo = y * W;
@@ -530,19 +533,32 @@
           bl = ab + (bb - ab) * tt;
         } else { r = ar; g = ag; bl = ab; }
 
-        // smoothstep alpha around the iso-threshold
-        let alpha = (v - lo) / span;
+        // Spatial anti-aliasing: convert the field to an approximate signed
+        // distance (in pixels) to the iso-surface using the local gradient,
+        // then ramp alpha over `aa` pixels. This keeps the edge equally crisp
+        // whether the field is steep (rims) or shallow (necks).
+        const xl = x > 0 ? F[idx - 1] : v;
+        const xr = x < W - 1 ? F[idx + 1] : v;
+        const yt = y > 0 ? F[idx - W] : v;
+        const yb = y < H - 1 ? F[idx + W] : v;
+        const gx = (xr - xl) * 0.5, gy = (yb - yt) * 0.5;
+        let gm = Math.sqrt(gx * gx + gy * gy);
+        if (gm < 1e-6) gm = 1e-6;
+        const sd = (v - T) / gm;              // signed distance, + = inside
+
+        let alpha = 0.5 + sd * invAA;
         alpha = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha;
 
-        // Outline: a band of field values just above the surface
-        if (useOutline && alpha > 0) {
-          const inner = T + outlineField;
-          let outFrac = (inner - v) / Math.max(band, 1e-4);
-          outFrac = outFrac < 0 ? 0 : outFrac > 1 ? 1 : outFrac;
-          outFrac *= alpha;
-          r = r + (or_ - r) * outFrac;
-          g = g + (og - g) * outFrac;
-          bl = bl + (ob - bl) * outFrac;
+        // Outline: a band `outlinePx` wide just inside the edge.
+        if (outlinePx > 0 && alpha > 0) {
+          let inner = 0.5 + (sd - outlinePx) * invAA;
+          inner = inner < 0 ? 0 : inner > 1 ? 1 : inner;
+          const outFrac = alpha - inner;      // coverage of the rim band
+          if (outFrac > 0) {
+            r = r + (or_ - r) * outFrac;
+            g = g + (og - g) * outFrac;
+            bl = bl + (ob - bl) * outFrac;
+          }
         }
 
         if (transparent) {

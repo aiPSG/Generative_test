@@ -42,7 +42,8 @@ https://<owner>.github.io/<repo>/
     for a more organic, hand-made look.
   - *Field strength* — how strongly each blob contributes to the field.
   - *Threshold (iso-level)* — fatter/merged vs. thin/separated blobs.
-  - *Edge smoothing* — anti-aliasing of the iso-surface.
+  - *Edge softness* — anti-aliasing width in **pixels**, applied via the field
+    gradient so necks stay exactly as crisp as blob rims (low = razor-sharp).
 - **Motion** — animate the blobs into "living goo" with adjustable wobble and speed.
 - **Color** — two-color gradient fill, background (or transparent), optional outline.
 - **Randomize** and **download PNG**.
