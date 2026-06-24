@@ -133,6 +133,33 @@
     body { grid-template-columns: 1fr; }
     aside { max-height: none; }
   }
+
+  /* ---- Embed modal ---- */
+  .modal {
+    position: fixed; inset: 0; z-index: 50;
+    background: rgba(4,5,9,.66); backdrop-filter: blur(3px);
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .modal[hidden] { display: none; }
+  .modal-card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    width: min(760px, 100%); max-height: 86vh; display: flex; flex-direction: column;
+    padding: 18px 18px 16px; box-shadow: 0 30px 80px rgba(0,0,0,.5);
+  }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; }
+  .modal-head h3 { margin: 0; font-size: 16px; }
+  .modal-sub { color: var(--muted); font-size: 12.5px; margin: 8px 0 12px; }
+  .icon-btn {
+    flex: none; width: 32px; height: 32px; padding: 0; border-radius: 8px;
+    background: var(--panel-2); border: 1px solid var(--line); color: var(--text); cursor: pointer;
+  }
+  .icon-btn:hover { border-color: var(--accent); }
+  #embedCode {
+    width: 100%; flex: 1; min-height: 220px; resize: vertical;
+    background: #0c0d12; color: #d8dbe6; border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre; overflow: auto; margin-bottom: 12px;
+  }
 </style>
 </head>
 <body>
@@ -160,6 +187,14 @@
       <label class="field">
         <span class="lbl">Letter spacing <b id="letterSpacingV"></b></span>
         <input type="range" id="letterSpacing" min="0" max="3" step="1" value="1" />
+      </label>
+      <label class="field">
+        <span class="lbl">Alignment</span>
+        <select id="align">
+          <option value="left">Left</option>
+          <option value="center" selected>Center</option>
+          <option value="right">Right</option>
+        </select>
       </label>
     </div>
 
@@ -255,6 +290,9 @@
       <button id="randomize">🎲 Randomize</button>
       <button id="download" class="primary">⬇ PNG</button>
     </div>
+    <div class="btns">
+      <button id="embed">&lt;/&gt; Embed on my site</button>
+    </div>
   </aside>
 
   <main>
@@ -269,6 +307,24 @@
     </div>
   </main>
 
+  <div id="modal" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Embed this animation</h3>
+        <button id="modalClose" class="icon-btn" title="Close">✕</button>
+      </div>
+      <p class="modal-sub">
+        Paste this snippet anywhere in your page's HTML. It's fully self-contained
+        (no libraries, no network) and draws a canvas with your exact settings.
+      </p>
+      <textarea id="embedCode" readonly spellcheck="false"></textarea>
+      <div class="btns">
+        <button id="copyCode" class="primary">📋 Copy snippet</button>
+        <button id="downloadHtml">⬇ Download .html</button>
+      </div>
+    </div>
+  </div>
+
 <script>
 (() => {
   "use strict";
@@ -276,13 +332,9 @@
   // ---------- DOM ----------
   const $ = (id) => document.getElementById(id);
   const view = $("view");
-  const ctx = view.getContext("2d");
-
-  // Unclamped floating-point scalar field — the heart of real metaballs.
-  let fieldBuf = null;
 
   const controls = {
-    text: $("text"), fontSize: $("fontSize"), letterSpacing: $("letterSpacing"),
+    text: $("text"), fontSize: $("fontSize"), letterSpacing: $("letterSpacing"), align: $("align"),
     radius: $("radius"), strength: $("strength"),
     threshold: $("threshold"), smooth: $("smooth"), sizeVar: $("sizeVar"),
     animate: $("animate"), wobble: $("wobble"), speed: $("speed"),
@@ -302,20 +354,21 @@
     for (const k in labels) $(labels[k]).textContent = controls[k].value;
   }
 
-  // ---------- Helpers ----------
-  function hexToRgb(h) {
-    const n = parseInt(h.slice(1), 16);
-    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-  }
+  // ---------- Engine factory (self-contained, serialized for embeds) ----------
+  // The live preview AND the exported snippet both run THIS exact function, so
+  // an embed always matches the preview. It references nothing outside itself.
+  function createMetaball(canvas, cfg, opts) {
+    opts = opts || {};
+    const ctx = canvas.getContext("2d");
+    const hexToRgb = (h) => {
+      const n = parseInt(h.slice(1), 16);
+      return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    };
 
-  // ---------- Hand-drawn 5×7 grid font ----------
-  // No system fonts. Each glyph is a 7-row × 5-col bitmap with a UNIFORM
-  // 1-cell stroke width — the style that metaballizes cleanly: every filled
-  // cell becomes one blob, neighbouring blobs fuse into smooth necks, and the
-  // counters (holes in O/A/B/8…) stay open because they sit 2+ cells from any
-  // blob. "#" = filled cell, "." = empty.
-  const GW = 5, GH = 7, LINE_GAP = 2;
-  const FONT = {
+    // Hand-drawn 5×7 grid font. No system fonts. Uniform 1-cell strokes
+    // metaballize cleanly; counters (O/A/B/8 holes) stay open. "#"=on, "."=off.
+    const GW = 5, GH = 7, LINE_GAP = 2;
+    const FONT = {
     " ": ["....." ,"....." ,"....." ,"....." ,"....." ,"....." ,"....."],
     "A": [".###.","#...#","#...#","#####","#...#","#...#","#...#"],
     "B": ["####.","#...#","#...#","####.","#...#","#...#","####."],
@@ -362,286 +415,294 @@
     "'": ["..#..","..#..",".#...",".....",".....",".....","....."],
   };
   function glyphFor(ch) {
-    const u = ch.toUpperCase();
-    return FONT[u] || (ch === " " ? FONT[" "] : FONT["?"]);
-  }
-  // Inked column extent of a glyph -> [minCol, maxCol], or null if blank.
-  // This is what makes proportional kerning possible: narrow glyphs (I, !, .)
-  // only advance by the columns they actually use instead of a fixed 5.
-  function inkExtent(g) {
-    let min = GW, max = -1;
-    for (let r = 0; r < GH; r++)
-      for (let c = 0; c < GW; c++)
-        if (g[r][c] === "#") { if (c < min) min = c; if (c > max) max = c; }
-    return max < 0 ? null : [min, max];
-  }
-  const SPACE_ADVANCE = 3; // word-space width, in cells
+      const u = ch.toUpperCase();
+      return FONT[u] || (ch === " " ? FONT[" "] : FONT["?"]);
+    }
+    function inkExtent(g) {
+      let min = GW, max = -1;
+      for (let r = 0; r < GH; r++)
+        for (let c = 0; c < GW; c++)
+          if (g[r][c] === "#") { if (c < min) min = c; if (c > max) max = c; }
+      return max < 0 ? null : [min, max];
+    }
+    const SPACE_ADVANCE = 3; // word-space width, in cells
 
-  // Lay the grid font out into one blob per filled cell, with proportional
-  // advance widths so kerning looks even.
-  let blobs = [];
-  let glyphBoxes = [];     // inked cell boxes, for the optional grid overlay
-  let layout = { cell: 26, pad: 60, cols: 1, rows: 1 };
-  let baseW = 800, baseH = 300;
+    let blobs = [], glyphBoxes = [];
+    let layout = { cell: 26, pad: 60, cols: 1, rows: 1 };
+    let baseW = 1, baseH = 1, fieldBuf = null;
 
-  function buildBlobs() {
-    const text = controls.text.value || " ";
-    const cell = +controls.fontSize.value;        // pixels per grid cell
-    const tracking = +controls.letterSpacing.value; // gap between glyphs, in cells
-    const lines = text.split("\n");
+    // Lay the grid font out into one blob per filled cell, with proportional
+    // kerning and left/center/right alignment.
+    function build() {
+      const text = (cfg.text != null ? String(cfg.text) : " ") || " ";
+      const cell = +cfg.cell;
+      const tracking = +cfg.letterSpacing;
+      const align = cfg.align || "center";
+      const lines = text.split("\n");
 
-    // First pass: measure each line using trimmed glyph widths.
-    const lineLayouts = lines.map((ln) => {
-      const items = [];
-      let width = 0;
-      const chars = [...ln];
-      for (let k = 0; k < chars.length; k++) {
-        const g = glyphFor(chars[k]);
-        const ext = inkExtent(g);
-        const item = ext
-          ? { g, minC: ext[0], w: ext[1] - ext[0] + 1, blank: false, x: width }
-          : { g, minC: 0, w: SPACE_ADVANCE, blank: true, x: width };
-        items.push(item);
-        width += item.w;
-        if (k < chars.length - 1) width += tracking;
-      }
-      return { items, width: Math.max(width, 1) };
-    });
+      const lineLayouts = lines.map((ln) => {
+        const items = [];
+        let width = 0;
+        const chars = [...ln];
+        for (let k = 0; k < chars.length; k++) {
+          const g = glyphFor(chars[k]);
+          const ext = inkExtent(g);
+          const item = ext
+            ? { g, minC: ext[0], w: ext[1] - ext[0] + 1, blank: false, x: width }
+            : { g, minC: 0, w: SPACE_ADVANCE, blank: true, x: width };
+          items.push(item);
+          width += item.w;
+          if (k < chars.length - 1) width += tracking;
+        }
+        return { items, width: Math.max(width, 1) };
+      });
 
-    const maxCols = Math.max(1, ...lineLayouts.map((l) => l.width));
-    const totalRows = lines.length * GH + (lines.length - 1) * LINE_GAP;
+      const maxCols = Math.max(1, ...lineLayouts.map((l) => l.width));
+      const totalRows = lines.length * GH + (lines.length - 1) * LINE_GAP;
 
-    const PAD = Math.round(cell * 2.8 + 18);      // margin so blob glow (incl. size variation) isn't clipped
-    baseW = Math.round(maxCols * cell + PAD * 2);
-    baseH = Math.round(totalRows * cell + PAD * 2);
+      const PAD = Math.round(cell * 2.8 + 18);
+      baseW = Math.round(maxCols * cell + PAD * 2);
+      baseH = Math.round(totalRows * cell + PAD * 2);
 
-    blobs = [];
-    glyphBoxes = [];
-    for (let li = 0; li < lineLayouts.length; li++) {
-      const { items, width } = lineLayouts[li];
-      const rowBase = li * (GH + LINE_GAP);
-      const startCol = (maxCols - width) / 2;       // center each line
-      for (const it of items) {
-        if (it.blank) continue;
-        const col0 = startCol + it.x;               // abs grid col of glyph's 1st inked column
-        glyphBoxes.push({ g: it.g, minC: it.minC, cols: it.w, col0, row0: rowBase });
-        for (let r = 0; r < GH; r++) {
-          for (let i = 0; i < it.w; i++) {
-            const c = it.minC + i;
-            if (it.g[r][c] === "#") {
-              const cx = PAD + (col0 + i + 0.5) * cell;
-              const cy = PAD + (rowBase + r + 0.5) * cell;
-              blobs.push({
-                x: cx, y: cy,
-                vr: Math.random() * 2 - 1,          // stable per-cell size seed [-1,1]
-                px: Math.random() * 6.283, py: Math.random() * 6.283,
-              });
+      blobs = [];
+      glyphBoxes = [];
+      for (let li = 0; li < lineLayouts.length; li++) {
+        const { items, width } = lineLayouts[li];
+        const rowBase = li * (GH + LINE_GAP);
+        const startCol = align === "left" ? 0
+          : align === "right" ? (maxCols - width)
+          : (maxCols - width) / 2;
+        for (const it of items) {
+          if (it.blank) continue;
+          const col0 = startCol + it.x;
+          glyphBoxes.push({ g: it.g, minC: it.minC, cols: it.w, col0, row0: rowBase });
+          for (let r = 0; r < GH; r++) {
+            for (let i = 0; i < it.w; i++) {
+              const c = it.minC + i;
+              if (it.g[r][c] === "#") {
+                const cx = PAD + (col0 + i + 0.5) * cell;
+                const cy = PAD + (rowBase + r + 0.5) * cell;
+                blobs.push({
+                  x: cx, y: cy,
+                  vr: Math.random() * 2 - 1,          // stable per-cell size seed [-1,1]
+                  px: Math.random() * 6.283, py: Math.random() * 6.283,
+                });
+              }
             }
           }
         }
       }
+
+      layout = { cell, pad: PAD, cols: maxCols, rows: totalRows };
+      canvas.width = baseW; canvas.height = baseH;
+      fieldBuf = new Float32Array(baseW * baseH);
+      if (opts.onInfo) opts.onInfo({ blobs: blobs.length, width: baseW, height: baseH });
     }
 
-    layout = { cell, pad: PAD, cols: maxCols, rows: totalRows };
+    // Real 2D metaballs: each blob adds a smooth (1 - d²/R²)² falloff to an
+    // unclamped Float32 field; nearby blobs sum in the gap to form connecting
+    // necks. Edges are anti-aliased in pixel space via the field gradient so
+    // necks stay as crisp as rims.
+    function render(t) {
+      const radius = (+cfg.radius) * layout.cell;
+      const peak = +cfg.strength / 100;
+      const T = (+cfg.threshold / 100) * 1.2;
+      const aa = 0.75 + (+cfg.smooth / 40) * 4;
+      const wobble = cfg.animate ? +cfg.wobble : 0;
+      const speed = +cfg.speed / 1000;
+      const variation = +cfg.sizeVar / 100;
 
-    // Size the visible canvas and (re)allocate the float field buffer
-    view.width = baseW; view.height = baseH;
-    fieldBuf = new Float32Array(baseW * baseH);
+      const W = baseW, H = baseH, F = fieldBuf;
+      F.fill(0);
 
+      for (let i = 0; i < blobs.length; i++) {
+        const b = blobs[i];
+        const R = Math.max(2, radius * (1 + variation * b.vr));
+        const R2 = R * R, invR2 = 1 / R2;
+        let bx = b.x, by = b.y;
+        if (wobble) {
+          bx += Math.cos(t * speed + b.px) * wobble;
+          by += Math.sin(t * speed + b.py) * wobble;
+        }
+        let x0 = (bx - R) | 0, x1 = Math.ceil(bx + R);
+        let y0 = (by - R) | 0, y1 = Math.ceil(by + R);
+        if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0;
+        if (x1 > W) x1 = W; if (y1 > H) y1 = H;
+        for (let y = y0; y < y1; y++) {
+          const dy = y - by, dy2 = dy * dy, row = y * W;
+          for (let x = x0; x < x1; x++) {
+            const dx = x - bx, d2 = dx * dx + dy2;
+            if (d2 < R2) { const q = 1 - d2 * invR2; F[row + x] += peak * q * q; }
+          }
+        }
+      }
+
+      const out = ctx.createImageData(W, H), o = out.data;
+      const [ar, ag, ab] = hexToRgb(cfg.colorA);
+      const [cr2, cg2, cb2] = hexToRgb(cfg.colorB);
+      const useGrad = !!cfg.gradient;
+      const [bgr, bgg, bgb] = hexToRgb(cfg.bg);
+      const transparent = !!cfg.transparentBg;
+      const useOutline = !!cfg.outline;
+      const [or_, og, ob] = hexToRgb(cfg.outlineColor);
+      const outlinePx = useOutline ? +cfg.outlineW : 0;
+      const invAA = 1 / aa;
+
+      for (let y = 0; y < H; y++) {
+        const yo = y * W;
+        for (let x = 0; x < W; x++) {
+          const idx = yo + x, v = F[idx], i4 = idx * 4;
+
+          let r, g, bl;
+          if (useGrad) {
+            const tt = x / W;
+            r = ar + (cr2 - ar) * tt; g = ag + (cg2 - ag) * tt; bl = ab + (cb2 - ab) * tt;
+          } else { r = ar; g = ag; bl = ab; }
+
+          const xl = x > 0 ? F[idx - 1] : v;
+          const xr = x < W - 1 ? F[idx + 1] : v;
+          const yt = y > 0 ? F[idx - W] : v;
+          const yb = y < H - 1 ? F[idx + W] : v;
+          const gx = (xr - xl) * 0.5, gy = (yb - yt) * 0.5;
+          let gm = Math.sqrt(gx * gx + gy * gy);
+          if (gm < 1e-6) gm = 1e-6;
+          const sd = (v - T) / gm;
+
+          let alpha = 0.5 + sd * invAA;
+          alpha = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha;
+
+          if (outlinePx > 0 && alpha > 0) {
+            let inner = 0.5 + (sd - outlinePx) * invAA;
+            inner = inner < 0 ? 0 : inner > 1 ? 1 : inner;
+            const outFrac = alpha - inner;
+            if (outFrac > 0) {
+              r = r + (or_ - r) * outFrac;
+              g = g + (og - g) * outFrac;
+              bl = bl + (ob - bl) * outFrac;
+            }
+          }
+
+          if (transparent) {
+            o[i4] = r; o[i4 + 1] = g; o[i4 + 2] = bl; o[i4 + 3] = (alpha * 255) | 0;
+          } else {
+            o[i4]     = (r * alpha + bgr * (1 - alpha)) | 0;
+            o[i4 + 1] = (g * alpha + bgg * (1 - alpha)) | 0;
+            o[i4 + 2] = (bl * alpha + bgb * (1 - alpha)) | 0;
+            o[i4 + 3] = 255;
+          }
+        }
+      }
+      ctx.putImageData(out, 0, 0);
+      if (cfg.showGrid) drawGrid();
+    }
+
+    function drawGrid() {
+      const cell = layout.cell, pad = layout.pad;
+      const [bgr, bgg, bgb] = hexToRgb(cfg.bg);
+      const lum = cfg.transparentBg ? 0.12 : (0.299 * bgr + 0.587 * bgg + 0.114 * bgb) / 255;
+      const base = lum > 0.5 ? "0,0,0" : "255,255,255";
+      ctx.save();
+      ctx.lineWidth = 1;
+      for (const box of glyphBoxes) {
+        for (let r = 0; r < GH; r++) {
+          for (let i = 0; i < box.cols; i++) {
+            const c = box.minC + i;
+            const x = pad + (box.col0 + i) * cell;
+            const y = pad + (box.row0 + r) * cell;
+            const on = box.g[r][c] === "#";
+            ctx.strokeStyle = "rgba(" + base + "," + (on ? 0.34 : 0.10) + ")";
+            ctx.strokeRect(x + 0.5, y + 0.5, cell, cell);
+            if (on) {
+              ctx.fillStyle = "rgba(" + base + ",0.5)";
+              ctx.beginPath();
+              ctx.arc(x + cell / 2, y + cell / 2, Math.max(1.2, cell * 0.06), 0, 6.2832);
+              ctx.fill();
+            }
+          }
+        }
+      }
+      ctx.restore();
+    }
+
+    const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+    let raf = null, start = now();
+    function frame(tn) {
+      render(tn - start);
+      raf = cfg.animate ? requestAnimationFrame(frame) : null;
+    }
+    function loop() {
+      if (cfg.animate) {
+        if (!raf) { start = now(); raf = requestAnimationFrame(frame); }
+      } else {
+        if (raf) { cancelAnimationFrame(raf); raf = null; }
+        render(now() - start);
+      }
+    }
+
+    build();
+    loop();
+
+    return {
+      apply: function (next, geometryChanged) {
+        cfg = next || cfg;
+        if (geometryChanged) build();
+        loop();
+      },
+      draw: function () { render(now() - start); },
+      destroy: function () { if (raf) cancelAnimationFrame(raf); raf = null; },
+    };
+  }
+
+  // ---------- App controller ----------
+  function readConfig() {
+    return {
+      text: controls.text.value,
+      cell: +controls.fontSize.value,
+      letterSpacing: +controls.letterSpacing.value,
+      align: controls.align.value,
+      radius: +controls.radius.value,
+      strength: +controls.strength.value,
+      threshold: +controls.threshold.value,
+      smooth: +controls.smooth.value,
+      sizeVar: +controls.sizeVar.value,
+      animate: controls.animate.checked,
+      wobble: +controls.wobble.value,
+      speed: +controls.speed.value,
+      gradient: controls.useGradient.checked,
+      colorA: controls.colorA.value,
+      colorB: controls.colorB.value,
+      transparentBg: controls.transparentBg.checked,
+      bg: controls.bgColor.value,
+      outline: controls.useOutline.checked,
+      outlineColor: controls.outlineColor.value,
+      outlineW: +controls.outlineW.value,
+      showGrid: controls.showGrid.checked,
+    };
+  }
+
+  function updateStat(info) {
     $("stat").textContent =
-      `${blobs.length} cells · ${baseW}×${baseH}px · 5×7 grid font · "${text.replace(/\n/g, " ")}"`;
+      info.blobs + " cells · " + info.width + "×" + info.height +
+      "px · 5×7 grid font · \"" + controls.text.value.replace(/\n/g, " ") + "\"";
   }
 
-  // ---------- Rendering ----------
-  // Real 2D metaballs: every blob adds a smooth falloff to a shared scalar
-  // field, accumulated WITHOUT clamping (Float32). Because the field from two
-  // nearby blobs sums in the gap between them, the region between them crosses
-  // the iso-threshold and a smooth connecting "neck" forms — that's what makes
-  // them merge instead of just overlapping as hard circles.
-  function render(t) {
-    const radius = (+controls.radius.value) * layout.cell;  // ratio × cell size
-    const peak = +controls.strength.value / 100;          // per-blob peak contribution
-    const T = (+controls.threshold.value / 100) * 1.2;    // iso-level in field units
-    const smoothUI = +controls.smooth.value;
-    // Edge softness measured in PIXELS, applied uniformly via the field gradient
-    // so necks are exactly as crisp as blob rims. ~0.75px = razor sharp.
-    const aa = 0.75 + (smoothUI / 40) * 4;
-    const wobble = controls.animate.checked ? +controls.wobble.value : 0;
-    const speed = +controls.speed.value / 1000;
+  syncLabels();
+  const engine = createMetaball(view, readConfig(), { onInfo: updateStat });
 
-    const variation = +controls.sizeVar.value / 100;     // 0..1 per-cell size spread
-
-    const W = baseW, H = baseH;
-    const F = fieldBuf;
-    F.fill(0);
-
-    // 1) Splat each blob's Wyvill falloff (1 - d²/R²)² into the float field.
-    //    Each blob's radius is jittered by its stable per-cell seed.
-    for (let i = 0; i < blobs.length; i++) {
-      const b = blobs[i];
-      const br = Math.max(2, radius * (1 + variation * b.vr));
-      const R2 = br * br, invR2 = 1 / R2;
-      let bx = b.x, by = b.y;
-      if (wobble) {
-        bx += Math.cos(t * speed + b.px) * wobble;
-        by += Math.sin(t * speed + b.py) * wobble;
-      }
-      let x0 = (bx - br) | 0, x1 = Math.ceil(bx + br);
-      let y0 = (by - br) | 0, y1 = Math.ceil(by + br);
-      if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0;
-      if (x1 > W) x1 = W; if (y1 > H) y1 = H;
-      for (let y = y0; y < y1; y++) {
-        const dy = y - by, dy2 = dy * dy, row = y * W;
-        for (let x = x0; x < x1; x++) {
-          const dx = x - bx;
-          const d2 = dx * dx + dy2;
-          if (d2 < R2) {
-            const q = 1 - d2 * invR2;   // 1 at center -> 0 at radius
-            F[row + x] += peak * q * q;
-          }
-        }
-      }
-    }
-
-    // 2) Threshold the field into the visible image.
-    const out = ctx.createImageData(W, H);
-    const o = out.data;
-
-    const [ar, ag, ab] = hexToRgb(controls.colorA.value);
-    const [br, bg, bb] = hexToRgb(controls.colorB.value);
-    const useGrad = controls.useGradient.checked;
-    const [bgr, bgg, bgb] = hexToRgb(controls.bgColor.value);
-    const transparent = controls.transparentBg.checked;
-    const useOutline = controls.useOutline.checked;
-    const [or_, og, ob] = hexToRgb(controls.outlineColor.value);
-    const outlinePx = useOutline ? +controls.outlineW.value : 0; // outline width in pixels
-    const invAA = 1 / aa;
-
-    for (let y = 0; y < H; y++) {
-      const yo = y * W;
-      for (let x = 0; x < W; x++) {
-        const idx = yo + x;
-        const v = F[idx];
-        const i4 = idx * 4;
-
-        // Fill color (horizontal gradient across the canvas)
-        let r, g, bl;
-        if (useGrad) {
-          const tt = x / W;
-          r = ar + (br - ar) * tt;
-          g = ag + (bg - ag) * tt;
-          bl = ab + (bb - ab) * tt;
-        } else { r = ar; g = ag; bl = ab; }
-
-        // Spatial anti-aliasing: convert the field to an approximate signed
-        // distance (in pixels) to the iso-surface using the local gradient,
-        // then ramp alpha over `aa` pixels. This keeps the edge equally crisp
-        // whether the field is steep (rims) or shallow (necks).
-        const xl = x > 0 ? F[idx - 1] : v;
-        const xr = x < W - 1 ? F[idx + 1] : v;
-        const yt = y > 0 ? F[idx - W] : v;
-        const yb = y < H - 1 ? F[idx + W] : v;
-        const gx = (xr - xl) * 0.5, gy = (yb - yt) * 0.5;
-        let gm = Math.sqrt(gx * gx + gy * gy);
-        if (gm < 1e-6) gm = 1e-6;
-        const sd = (v - T) / gm;              // signed distance, + = inside
-
-        let alpha = 0.5 + sd * invAA;
-        alpha = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha;
-
-        // Outline: a band `outlinePx` wide just inside the edge.
-        if (outlinePx > 0 && alpha > 0) {
-          let inner = 0.5 + (sd - outlinePx) * invAA;
-          inner = inner < 0 ? 0 : inner > 1 ? 1 : inner;
-          const outFrac = alpha - inner;      // coverage of the rim band
-          if (outFrac > 0) {
-            r = r + (or_ - r) * outFrac;
-            g = g + (og - g) * outFrac;
-            bl = bl + (ob - bl) * outFrac;
-          }
-        }
-
-        if (transparent) {
-          o[i4] = r; o[i4 + 1] = g; o[i4 + 2] = bl; o[i4 + 3] = (alpha * 255) | 0;
-        } else {
-          o[i4]     = (r * alpha + bgr * (1 - alpha)) | 0;
-          o[i4 + 1] = (g * alpha + bgg * (1 - alpha)) | 0;
-          o[i4 + 2] = (bl * alpha + bgb * (1 - alpha)) | 0;
-          o[i4 + 3] = 255;
-        }
-      }
-    }
-    ctx.putImageData(out, 0, 0);
-
-    if (controls.showGrid.checked) drawGrid();
-  }
-
-  // Draw the underlying 5×7 lattice each glyph is built on. Lines adapt to the
-  // background luminance so they read on light or dark. Filled cells (the blob
-  // sources) are drawn brighter, with a dot at each blob center.
-  function drawGrid() {
-    const cell = layout.cell, pad = layout.pad;
-    const [bgr, bgg, bgb] = hexToRgb(controls.bgColor.value);
-    const lum = controls.transparentBg.checked
-      ? 0.12 : (0.299 * bgr + 0.587 * bgg + 0.114 * bgb) / 255;
-    const base = lum > 0.5 ? "0,0,0" : "255,255,255";
-
-    ctx.save();
-    ctx.lineWidth = 1;
-    for (const box of glyphBoxes) {
-      for (let r = 0; r < GH; r++) {
-        for (let i = 0; i < box.cols; i++) {
-          const c = box.minC + i;
-          const x = pad + (box.col0 + i) * cell;
-          const y = pad + (box.row0 + r) * cell;
-          const on = box.g[r][c] === "#";
-          ctx.strokeStyle = `rgba(${base},${on ? 0.34 : 0.10})`;
-          ctx.strokeRect(x + 0.5, y + 0.5, cell, cell);
-          if (on) {
-            ctx.fillStyle = `rgba(${base},0.5)`;
-            ctx.beginPath();
-            ctx.arc(x + cell / 2, y + cell / 2, Math.max(1.2, cell * 0.06), 0, 6.2832);
-            ctx.fill();
-          }
-        }
-      }
-    }
-    ctx.restore();
-  }
-
-  // ---------- Loop ----------
-  let raf = null, start = performance.now();
-  function frame(now) {
-    render(now - start);
-    if (controls.animate.checked) raf = requestAnimationFrame(frame);
-    else raf = null;
-  }
-  function kick() {
-    if (controls.animate.checked) {
-      if (!raf) { start = performance.now(); raf = requestAnimationFrame(frame); }
-    } else {
-      if (raf) { cancelAnimationFrame(raf); raf = null; }
-      render(performance.now() - start);
-    }
-  }
-  function rebuild() { buildBlobs(); kick(); }
-
-  // ---------- Wiring ----------
-  // Controls that change geometry -> rebuild blob set
-  ["text", "fontSize", "letterSpacing"].forEach((id) =>
-    controls[id].addEventListener("input", () => { syncLabels(); rebuild(); }));
-  // Controls that only change appearance -> just re-render
+  // Wiring: geometry changes rebuild the layout; appearance changes just redraw.
+  ["text", "fontSize", "letterSpacing", "align"].forEach((id) =>
+    controls[id].addEventListener("input", () => { syncLabels(); engine.apply(readConfig(), true); }));
   ["radius", "strength", "threshold", "smooth", "sizeVar", "wobble", "speed",
    "useGradient", "colorA", "colorB", "transparentBg", "bgColor",
    "useOutline", "outlineColor", "outlineW", "showGrid"].forEach((id) =>
-    controls[id].addEventListener("input", () => { syncLabels(); kick(); }));
-  controls.animate.addEventListener("change", kick);
-  controls.showGrid.addEventListener("change", kick);
+    controls[id].addEventListener("input", () => { syncLabels(); engine.apply(readConfig(), false); }));
+  controls.animate.addEventListener("change", () => engine.apply(readConfig(), false));
+  controls.showGrid.addEventListener("change", () => engine.apply(readConfig(), false));
 
   // Randomize
   $("randomize").addEventListener("click", () => {
     const rnd = (a, b) => Math.round(a + Math.random() * (b - a));
-    controls.radius.value = (1.0 + Math.random() * 0.7).toFixed(2); // ratio of cell
+    controls.radius.value = (1.0 + Math.random() * 0.7).toFixed(2);
     controls.strength.value = rnd(45, 80);
     controls.threshold.value = rnd(22, 42);
     controls.smooth.value = rnd(6, 22);
@@ -650,16 +711,71 @@
     controls.colorA.value = h();
     controls.colorB.value = h();
     controls.useGradient.checked = Math.random() > 0.3;
-    syncLabels(); rebuild();
+    syncLabels(); engine.apply(readConfig(), true);
   });
 
-  // Download PNG (re-render current frame first to be safe)
+  // Download PNG
   $("download").addEventListener("click", () => {
-    render(performance.now() - start);
+    engine.draw();
     const a = document.createElement("a");
     a.download = "metaball-type.png";
     a.href = view.toDataURL("image/png");
     a.click();
+  });
+
+  // ---------- Embed export ----------
+  // Serialize the SAME engine function + current settings into a standalone
+  // snippet. document.currentScript lets it drop a canvas exactly where pasted,
+  // so multiple widgets on one page don't collide.
+  function buildEmbedCode() {
+    const cfg = readConfig();
+    cfg.showGrid = false; // the grid is an authoring aid
+    const fnSrc = createMetaball.toString();
+    return [
+      "<!-- Metaball Type — self-contained widget, no dependencies -->",
+      "<script>",
+      "(function(){",
+      "  var cfg = " + JSON.stringify(cfg) + ";",
+      "  var createMetaball = " + fnSrc + ";",
+      "  var s = document.currentScript;",
+      "  var c = document.createElement('canvas');",
+      "  c.style.maxWidth = '100%'; c.style.height = 'auto';",
+      "  (s && s.parentNode ? s.parentNode : document.body).insertBefore(c, s || null);",
+      "  createMetaball(c, cfg);",
+      "})();",
+      "<\/script>",
+    ].join("\n");
+  }
+
+  const modal = $("modal");
+  $("embed").addEventListener("click", () => {
+    $("embedCode").value = buildEmbedCode();
+    modal.hidden = false;
+  });
+  function closeModal() { modal.hidden = true; }
+  $("modalClose").addEventListener("click", closeModal);
+  modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !modal.hidden) closeModal(); });
+
+  $("copyCode").addEventListener("click", async () => {
+    const ta = $("embedCode"), btn = $("copyCode"), old = btn.textContent;
+    try { await navigator.clipboard.writeText(ta.value); }
+    catch (e) { ta.focus(); ta.select(); document.execCommand("copy"); }
+    btn.textContent = "✓ Copied"; setTimeout(() => { btn.textContent = old; }, 1400);
+  });
+
+  $("downloadHtml").addEventListener("click", () => {
+    const cfg = readConfig();
+    const bg = cfg.transparentBg ? "#111318" : cfg.bg;
+    const page =
+      "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<title>Metaball Type</title>\n" +
+      "<style>html,body{margin:0;height:100%}body{display:grid;place-items:center;background:" + bg + "}</style>\n" +
+      "</head>\n<body>\n" + buildEmbedCode() + "\n</body>\n</html>\n";
+    const a = document.createElement("a");
+    a.download = "metaball-type.html";
+    a.href = URL.createObjectURL(new Blob([page], { type: "text/html" }));
+    a.click();
+    URL.revokeObjectURL(a.href);
   });
 
   // Source link points at the hosting repo when on GitHub Pages
@@ -672,10 +788,6 @@
       $("repoLink").href = "https://github.com/";
     }
   })();
-
-  // ---------- Init ----------
-  syncLabels();
-  rebuild();
 })();
 </script>
 </body>

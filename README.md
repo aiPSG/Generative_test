@@ -34,6 +34,7 @@ https://<owner>.github.io/<repo>/
   - *Cell size* — pixels per grid cell (overall letter scale).
   - *Letter spacing* — gap between glyphs, in cells. Glyphs use **proportional
     kerning** (narrow glyphs like `I !  . 1` only advance by the columns they use).
+  - *Alignment* — left / center / right.
   - *Show underlying grid* — overlay the 5×7 lattice each glyph is built on.
 - **Metaball attributes**
   - *Blob radius (× cell)* — blob size as a multiple of the cell, so letters
@@ -47,6 +48,15 @@ https://<owner>.github.io/<repo>/
 - **Motion** — animate the blobs into "living goo" with adjustable wobble and speed.
 - **Color** — two-color gradient fill, background (or transparent), optional outline.
 - **Randomize** and **download PNG**.
+- **Embed on your site** — export a self-contained `<script>` snippet (or a full
+  `.html` file) that reproduces the animation with your exact settings.
+
+## Embedding on your own page
+
+Click **&lt;/&gt; Embed on my site**, copy the snippet, and paste it anywhere in
+your HTML. It has **no dependencies and makes no network requests** — it inlines
+the whole renderer plus your settings and draws a `<canvas>` right where you
+paste it. Multiple snippets can coexist on one page.
 
 ## How it works
 
